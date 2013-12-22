@@ -33,8 +33,10 @@ class MainFrame ( wx.Frame ):
 		
 		left_boxsizer.Add( self.left_header, 0, wx.ALIGN_CENTER_HORIZONTAL|wx.ALL, 5 )
 		
-		self.left_dirpicker = wx.DirPickerCtrl( self,  message="Select a folder", name='primary_dirpicker' )
-		left_boxsizer.Add( self.left_dirpicker, 0, wx.ALL|wx.EXPAND, 5 )
+		#self.left_dirpicker = wx.DirPickerCtrl( self,  message="Select a folder", name='primary_dirpicker' )
+		#left_boxsizer.Add( self.left_dirpicker, 0, wx.ALL|wx.EXPAND, 5 )
+		self.primary_dir_choice_button = wx.Button(self, -1, "Select a folder")
+		left_boxsizer.Add( self.primary_dir_choice_button, 0, wx.ALL|wx.EXPAND, 5 )
 		
 		left_listboxChoices = []
 		self.left_listbox = ListBox( self, wx.ID_ANY, wx.DefaultPosition, wx.DefaultSize, left_listboxChoices, wx.LB_EXTENDED|wx.LB_NEEDED_SB|wx.LB_SORT )
@@ -68,8 +70,10 @@ class MainFrame ( wx.Frame ):
 		
 		right_boxsizer.Add( self.right_header, 0, wx.ALIGN_CENTER_HORIZONTAL|wx.ALL, 5 )
 		
-		self.right_dirpicker = wx.DirPickerCtrl( self,  message="Select a folder", name='secondary_dirpicker' )
-		right_boxsizer.Add( self.right_dirpicker, 0, wx.ALL|wx.EXPAND, 5 )
+		#self.right_dirpicker = wx.DirPickerCtrl( self,  message="Select a folder", name='secondary_dirpicker' )
+		#right_boxsizer.Add( self.right_dirpicker, 0, wx.ALL|wx.EXPAND, 5 )
+		self.secondary_dir_choice_button = wx.Button(self, -1, "Select a folder")
+		right_boxsizer.Add( self.secondary_dir_choice_button, 0, wx.ALL|wx.EXPAND, 5 )
 		
 		right_listboxChoices = []
 		self.right_listbox = ListBox( self, wx.ID_ANY, wx.DefaultPosition, wx.DefaultSize, right_listboxChoices, wx.LB_EXTENDED|wx.LB_NEEDED_SB|wx.LB_SORT )
@@ -85,27 +89,14 @@ class MainFrame ( wx.Frame ):
 		
 		# Connect Events
 		self.Bind( wx.EVT_CLOSE, self.on_frame_close )
-		self.left_dirpicker.Bind( wx.EVT_DIRPICKER_CHANGED, self.on_change_dir_choice )
-		self.move_right_button.Bind( wx.EVT_BUTTON, self.move_folder_to_secondary )
-		self.move_left_button.Bind( wx.EVT_BUTTON, self.move_folder_to_primary )
-		self.right_dirpicker.Bind( wx.EVT_DIRPICKER_CHANGED, self.on_change_dir_choice )
+		#self.left_dirpicker.Bind( wx.EVT_DIRPICKER_CHANGED, self.on_change_dir_choice )
+		self.primary_dir_choice_button.Bind( wx.EVT_BUTTON, self.on_change_primary_dir_choice )
+		self.move_right_button.Bind( wx.EVT_BUTTON, self.on_games_move_to_secondary )
+		self.move_left_button.Bind( wx.EVT_BUTTON, self.on_games_move_to_primary )
+		#self.right_dirpicker.Bind( wx.EVT_DIRPICKER_CHANGED, self.on_change_dir_choice )
+		self.secondary_dir_choice_button.Bind( wx.EVT_BUTTON, self.on_change_secondary_dir_choice )
 	
 	def __del__( self ):
 		pass
-	
-	
-	# Virtual event handlers, overide them in your derived class
-	def on_change_dir_choice( self, event ):
-		print 'dir changed'
-		event.Skip()
-	
-	def move_folder_to_secondary( self, event ):
-		event.Skip()
-	
-	def move_folder_to_primary( self, event ):
-		event.Skip()
-		
-	def on_frame_close( self, event ):
-		event.Skip()
 	
 
