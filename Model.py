@@ -1,6 +1,30 @@
-import os, shutil, ast
+import os, sys, shutil, ast
 from wx.lib.pubsub import Publisher as pub		
 
+config_file = sys.path[0] + os.sep + '.config'
+
+
+
+
+# Improve shutil.copy2
+# Makes a copy of 'copy2', then makes a new copy2 with broadcasting and includes the original copy2 in the flow, then assigns the new copy2 to the shutil namespace so it is used instead of the original
+shutil.builtin_copy2 = shutil.copy2
+
+def copy2(src,dst):
+	'''Wraps shutil.copy2 so it broadcasts whenever a file has been copied
+	
+	Used for progress dialog
+	'''
+	# Call original copy2
+	shutil.builtin_copy2(src,dst)
+	# Broadcast file copied
+	pub.sendMessage("FILE MOVED", None)
+	
+shutil.copy2 = copy2
+	
+	
+	
+	
 
 def _update_settings_file(attribute, value):
 	'''Writes the new settings to the settings file
@@ -15,7 +39,7 @@ def _update_settings_file(attribute, value):
 	# Ensure value is string (for lazy saving)
 	value = str(value)
 		
-	with open('.config', 'r+') as FILE:
+	with open(config_file, 'r+') as FILE:
 		new_contents = []
 		attribute_found = False
 		
@@ -38,11 +62,13 @@ def _update_settings_file(attribute, value):
 		FILE.truncate() # Discard remaining file contents (after this position)
 
 
-def get_directory_size(path):
-	''' Returns the size of a directory in bytes.
+def get_directory_size(path, unit='B'):
+	''' Returns the size of a directory - in bytes by default. 
+	
+	Also supports KB
 	
 	Copied from: http://stackoverflow.com/questions/1392413/calculating-a-directory-size-using-python
-	Apparently this has the same result as "df -sb"
+	Apparently this has the same result as "du -sb"
 	'''
 	
 	total_size = 0
@@ -63,8 +89,18 @@ def get_directory_size(path):
 			seen.add(stat.st_ino)
 
 			total_size += stat.st_size
+	
+	if unit == 'KB':
+		total_size = int(total_size / 1024)
+	
+	return total_size  # default size in bytes
 
-	return total_size  # size in bytes
+
+def get_file_count(path):
+	'''Returns the number of files in a directory (path)
+	
+	Counting is recursive (will count files in subdirectories) and will not count directories themselves as files.'''
+	return sum([len(files) for r, d, files in os.walk(path)])
 	
 		
 
@@ -80,8 +116,8 @@ class Model:
 		
 		
 		# If config file exists, initialize values from there
-		if os.path.isfile('.config'):	
-			with open('.config', 'r+') as FILE:
+		if os.path.isfile(config_file):	
+			with open(config_file, 'r+') as FILE:
 				size_set = False
 				
 				# Get the primary and secondary paths from the settings file (if present)
@@ -106,8 +142,8 @@ class Model:
 		
 		
 		else:
-			with open('.config', 'w') as FILE:
-				primary_path = os.path.expanduser("~") + '/.steam/steam/SteamApps/common/'
+			with open(config_file, 'w') as FILE:
+				primary_path = os.path.expanduser("~") + '/.steam/steam/SteamApps/common'
 				self.change_primary_path(primary_path)
 				FILE.write('primary=' + primary_path + os.linesep)
 				FILE.write('secondary=')
@@ -158,8 +194,18 @@ class Model:
 	def _move_games_common(self, game_names, listtype):	
 		if listtype == 'secondary':
 			message_type = 'SECONDARY'
+			# If moving games to secondary, broadcast that files are being moved _from_ primary (used to show the progress dialog)
+			pub.sendMessage("MOVING GAMES", { 
+				'initial_path' : self.primary_path,
+				'final_path' : self.secondary_path,
+				'game_names' : game_names})
 		elif listtype == 'primary':
 			message_type = 'PRIMARY'
+			# If moving games to primary, broadcast that files are being moved _from_ secondary (used to show the progress dialog)
+			pub.sendMessage("MOVING GAMES", { 
+				'initial_path' : self.secondary_path,
+				'final_path' : self.primary_path,
+				'game_names' : game_names})
 		
 		
 		# Move games
@@ -169,17 +215,16 @@ class Model:
 			
 			if listtype == 'secondary':
 				# Move game folder to secondary
-				shutil.move(p,s)
+				shutil.move(p,s) # Includes "FILE MOVED" broadcast
 				# Create symlink back to primary folder
 				os.symlink(s,p)
 				
 			elif listtype == 'primary':
-				print 'primary'
 				# Remove symlink on primary
 				os.remove(p)
 				# Move game folder back to primary
-				shutil.move(s,p)
-				
+				shutil.move(s,p) # Includes "FILE MOVED" broadcast
+			
 		
 		self._update_list('primary')
 		self._update_list('secondary')

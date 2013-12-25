@@ -39,6 +39,7 @@ class Frame(layout.MainFrame):
 		pub.subscribe(self.secondary_path_changed, "SECONDARY PATH CHANGED")
 		pub.subscribe(self.games_move_to_secondary, "GAMES MOVED TO SECONDARY")
 		pub.subscribe(self.games_move_to_primary, "GAMES MOVED TO PRIMARY")
+		pub.subscribe(self.display_move_dialog, "MOVING GAMES")
 		pub.subscribe(self.window_size_changed, "WINDOW SIZE CHANGED")
 		pub.subscribe(self.window_coords_changed, "WINDOW COORDS CHANGED")
 		pub.subscribe(self.use_default_window_size, "NO SIZE FOUND")
@@ -49,16 +50,13 @@ class Frame(layout.MainFrame):
 	
 	#### The following 'on' methods are bound to the widgets in layout.py	####
 	
-	def on_games_move_to_secondary( self, event ):
-		'''Moves a folder to the secondary storage'''
-		games = self.left_listbox.GetSelectionsStrings()
-		self.model.move_games_to_secondary(games)
-		event.Skip()
-	
-	def on_games_move_to_primary( self, event ):
-		'''Moves a folder to the primary storage'''
-		games = self.right_listbox.GetSelectionsStrings()
-		self.model.move_games_to_primary(games)
+	def on_games_move( self, event ):
+		if event.GetEventObject().GetName() == 'move_to_secondary_button':
+			games = self.left_listbox.GetSelectionsStrings()
+			self.model.move_games_to_secondary(games)
+		elif event.GetEventObject().GetName() == 'move_to_primary_button':
+			games = self.right_listbox.GetSelectionsStrings()
+			self.model.move_games_to_primary(games)
 		event.Skip()
 	
 	def on_change_primary_dir_choice(self, event):
@@ -83,7 +81,8 @@ class Frame(layout.MainFrame):
 		self.model.change_window_coords(self.GetPosition())
 		event.Skip()
 		
-
+		
+		
 	
 	#### Broadcast response methods ####
 	
@@ -109,23 +108,19 @@ class Frame(layout.MainFrame):
 	
 	def use_default_window_size(self,message):
 		self.Fit()
-
-
+		
+	def display_move_dialog(self, message):
+		'''When model broadcasts games are being moved, creates a file moving (progress) dialog'''
+		self.progress_dialog = layout.Moving_progress_dialog(self, message.data['initial_path'], message.data['final_path'], message.data['game_names'])
+	
+	
 	
 class App(wx.App):
 	
 	def OnInit(self):
 		self.frame = Frame(parent=None)
 		self.frame.Show()
-		self.SetTopWindow(self.frame)
-		
-					
-			# If the size was not set using config values then use wxPython's autosizing
-			#size_set = True
-			#if size_set is not True:
-			#	
-		
-		
+		self.SetTopWindow(self.frame)		
 		return True
 		
 if __name__ == '__main__':

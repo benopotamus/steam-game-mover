@@ -1,7 +1,8 @@
 # -*- coding: utf-8 -*- 
 
-import wx
-import wx.xrc
+import os, wx
+from wx.lib.pubsub import Publisher as pub
+import Model
 
 
 class ListBox(wx.ListBox):
@@ -14,6 +15,87 @@ class ListBox(wx.ListBox):
 			result.append(self.GetString(selection))
 		
 		return result
+
+
+
+class Moving_progress_dialog(object):
+	'''Wraps (and creates) the ProgressDialog to show progress when files are moved. 
+	
+	Dialog is updated in response to direct method calls which are in response to file moving broadcasts from the model
+	
+	Both paths are needed. The initial path to get the total file size being moved and the final path (the path games are being moved to) to update current total transferred'''
+	def __init__(self, frame, initial_path, final_path, game_names):
+		print 'creating object'
+		self.frame = frame
+		self.initial_path = initial_path
+		self.final_path = final_path
+		self.game_names = game_names
+		
+		# Subscribe to file copy broadcasts from shutil.copy2 (one broadcast per file)
+		pub.subscribe(self.update_dialog, "FILE MOVED")
+		# Subscribe to finished moving broadcast
+		pub.subscribe(self.destroy_dialog, "GAMES MOVED TO SECONDARY")
+		pub.subscribe(self.destroy_dialog, "GAMES MOVED TO PRIMARY")
+		
+		
+		self.initial_dirs = []
+		self.final_dirs = []
+		# Create full game paths for both initial and secondary
+		for game in self.game_names:
+			self.initial_dirs.append(self.initial_path + os.sep + game)
+			self.final_dirs.append(self.final_path + os.sep + game)
+		
+		
+		# Get total file size of initial directories (the ones being moved)
+		self.total = 0
+		for d in self.initial_dirs:
+			self.total = self.total + Model.get_directory_size(d, unit='KB')
+		
+		print 'self.total=' + str(self.total)
+		print 'type self.total=' + str(type(self.total))
+		
+		self.dlg = wx.ProgressDialog(
+			"Moving files",
+			'Some message here?',
+			maximum=self.total,
+			parent=self.frame,
+			style=wx.PD_REMAINING_TIME)
+	
+		self.counter_for_next_update = 5 # Used to limit the number of times the directory size is checked
+		
+		
+		
+	def update_dialog(self, message):
+
+		# delay for testing
+		import time
+	
+		# Every 5 files moved, update dialog
+		if self.counter_for_next_update == 5:
+			transferred_total = 0
+			
+			# Loop through the final directory paths and total up the size of the ones that have been moved
+			# shutil does a move by copying and then deleting, so size must be counted on the copied to end.
+			for d in self.final_dirs:
+				if os.path.exists(d):
+					transferred_total = transferred_total + Model.get_directory_size(d, unit='KB')
+			
+			
+			# Update dialog with new count value
+			#(keepGoing, skip) = self.dlg.Update(transferred_total)
+			
+			# Reset counter
+			self.counter_for_next_update = 0
+		
+
+		self.counter_for_next_update = self.counter_for_next_update + 1
+	
+	
+	
+	def destroy_dialog(self, message):
+		'''Closes the dialog'''
+		self.dlg.Destroy()
+
 
 
 class MainFrame ( wx.Frame ):
@@ -50,10 +132,10 @@ class MainFrame ( wx.Frame ):
 		
 		buttons_boxsizer.AddSpacer( ( 0, 0), 1, wx.EXPAND, 5 )
 		
-		self.move_right_button = wx.Button( self, wx.ID_ANY, u">", wx.Point( 20,40 ), wx.DefaultSize, 0 )
+		self.move_right_button = wx.Button( self, label=">", pos=wx.Point( 20,40 ), name='move_to_secondary_button' )
 		buttons_boxsizer.Add( self.move_right_button, 0, wx.ALIGN_CENTER|wx.ALL, 5 )
 		
-		self.move_left_button = wx.Button( self, wx.ID_ANY, u"<", wx.DefaultPosition, wx.DefaultSize, 0 )
+		self.move_left_button = wx.Button( self, label="<", name='move_to_primary_button')
 		buttons_boxsizer.Add( self.move_left_button, 0, wx.ALIGN_CENTER|wx.ALL, 5 )
 		
 		
@@ -91,8 +173,8 @@ class MainFrame ( wx.Frame ):
 		self.Bind( wx.EVT_CLOSE, self.on_frame_close )
 		#self.left_dirpicker.Bind( wx.EVT_DIRPICKER_CHANGED, self.on_change_dir_choice )
 		self.primary_dir_choice_button.Bind( wx.EVT_BUTTON, self.on_change_primary_dir_choice )
-		self.move_right_button.Bind( wx.EVT_BUTTON, self.on_games_move_to_secondary )
-		self.move_left_button.Bind( wx.EVT_BUTTON, self.on_games_move_to_primary )
+		self.move_right_button.Bind( wx.EVT_BUTTON, self.on_games_move )
+		self.move_left_button.Bind( wx.EVT_BUTTON, self.on_games_move )
 		#self.right_dirpicker.Bind( wx.EVT_DIRPICKER_CHANGED, self.on_change_dir_choice )
 		self.secondary_dir_choice_button.Bind( wx.EVT_BUTTON, self.on_change_secondary_dir_choice )
 	
