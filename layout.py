@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*- 
 
-import os, wx
+import os, sys, wx
 from wx.lib.pubsub import Publisher as pub
 import Model
 
@@ -25,7 +25,6 @@ class Moving_progress_dialog(object):
 	
 	Both paths are needed. The initial path to get the total file size being moved and the final path (the path games are being moved to) to update current total transferred'''
 	def __init__(self, frame, initial_path, final_path, game_names):
-		print 'creating object'
 		self.frame = frame
 		self.initial_path = initial_path
 		self.final_path = final_path
@@ -46,29 +45,28 @@ class Moving_progress_dialog(object):
 			self.final_dirs.append(self.final_path + os.sep + game)
 		
 		
-		# Get total file size of initial directories (the ones being moved)
+		# Get total file count of initial directories (the ones being moved)
 		self.total = 0
 		for d in self.initial_dirs:
-			self.total = self.total + Model.get_directory_size(d, unit='KB')
+			self.total = self.total + Model.get_file_count(d)
 		
-		print 'self.total=' + str(self.total)
-		print 'type self.total=' + str(type(self.total))
 		
+		# Create and display dialog
 		self.dlg = wx.ProgressDialog(
 			"Moving files",
-			'Some message here?',
+			"                                                 ", # The width of the dialog is initial defined by the width of this string
 			maximum=self.total,
-			parent=self.frame,
-			style=wx.PD_REMAINING_TIME)
-	
-		self.counter_for_next_update = 5 # Used to limit the number of times the directory size is checked
+			parent=self.frame)
+		
+		
+		# This counter is used to limit the number of times the directory size is checked
+		# I'm not sure if this needed, but it seems wasteful to recount the all directory files after every file transfer. 
+		# Counting them every 5 file transfers seems fine :-)
+		self.counter_for_next_update = 5
 		
 		
 		
 	def update_dialog(self, message):
-
-		# delay for testing
-		import time
 	
 		# Every 5 files moved, update dialog
 		if self.counter_for_next_update == 5:
@@ -78,11 +76,11 @@ class Moving_progress_dialog(object):
 			# shutil does a move by copying and then deleting, so size must be counted on the copied to end.
 			for d in self.final_dirs:
 				if os.path.exists(d):
-					transferred_total = transferred_total + Model.get_directory_size(d, unit='KB')
+					transferred_total = transferred_total + Model.get_file_count(d)
 			
 			
 			# Update dialog with new count value
-			#(keepGoing, skip) = self.dlg.Update(transferred_total)
+			(keepGoing, skip) = self.dlg.Update(transferred_total)
 			
 			# Reset counter
 			self.counter_for_next_update = 0
@@ -101,7 +99,10 @@ class Moving_progress_dialog(object):
 class MainFrame ( wx.Frame ):
 	
 	def __init__( self, parent ):
-		wx.Frame.__init__ ( self, parent, id = wx.ID_ANY, title = wx.EmptyString, pos = wx.DefaultPosition, size = wx.Size( 811,237 ), style = wx.DEFAULT_FRAME_STYLE|wx.TAB_TRAVERSAL, name = u"Steam mover" )
+		wx.Frame.__init__ ( self, parent, id = wx.ID_ANY, title = "Steam mover", pos = wx.DefaultPosition, size = wx.Size( 811,237 ), style = wx.DEFAULT_FRAME_STYLE|wx.TAB_TRAVERSAL, name = "Steam mover" )
+		
+		icon = wx.Icon(sys.path[0] + os.sep + 'icon.png', wx.BITMAP_TYPE_PNG)
+		self.SetIcon(icon)
 		
 		self.SetSizeHintsSz( wx.DefaultSize, wx.DefaultSize )
 		
