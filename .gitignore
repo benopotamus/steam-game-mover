@@ -2,3 +2,5 @@
 *~
 offcuts
 .config
+settings.ini
+__pycache__

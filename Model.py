@@ -1,249 +1,312 @@
-import os, sys, shutil, ast
-from wx.lib.pubsub import Publisher as pub		
+'''Model for steam game mover
 
-config_file = sys.path[0] + os.sep + '.config'
+The file system is the ultimate data source.'''
+
+import configparser, os, os.path
+from gi.repository import GObject
+
+
+'''Config structure
+
+[DEFAULT]
+Window_position = x,y
+Window_size = width,height
+Maximized = true/false
+
+[STEAM_FOLDER_LIST]
+Path = /
+Sort_by = games/size
+Sort_type = ascending/descending
+
+[OTHER_FOLDER_LIST]
+Path = /
+Sort_by = games/size
+Sort_type = ascending/descending
+
+'''
+
+config_filename = 'settings.ini'
+config = configparser.ConfigParser()
+config.read(config_filename)
+
+# Create sections
+c = config['DEFAULT']
+
+if 'STEAM_FOLDER_LIST' not in config:
+	config['STEAM_FOLDER_LIST'] = {}
+if 'OTHER_FOLDER_LIST' not in config:
+	config['OTHER_FOLDER_LIST'] = {}
+	
+c_liststore_primary = config['STEAM_FOLDER_LIST']
+c_liststore_secondary = config['OTHER_FOLDER_LIST']
 
 
 
 
-# Improve shutil.copy2
-# Makes a copy of 'copy2', then makes a new copy2 with broadcasting and includes the original copy2 in the flow, then assigns the new copy2 to the shutil namespace so it is used instead of the original
-shutil.builtin_copy2 = shutil.copy2
+def save_application_state():
+	'''Saves application state - including window size and position
+	
+	Assumes the configparser was being updated for duration of program'''
+	with open(config_filename, 'w') as configfile:
+		config.write(configfile)
 
-def copy2(src,dst):
-	'''Wraps shutil.copy2 so it broadcasts whenever a file has been copied
-	
-	Used for progress dialog
-	'''
-	# Call original copy2
-	shutil.builtin_copy2(src,dst)
-	# Broadcast file copied
-	pub.sendMessage("FILE MOVED", None)
-	
-shutil.copy2 = copy2
-	
-	
-	
-	
 
-def _update_settings_file(attribute, value):
-	'''Writes the new settings to the settings file
+
+
+
+class Model(GObject.GObject):
+	''' The data model'''
 	
-	File format
+	# Create custom signals to support View changing after Model updates
+	__gsignals__ = {
+		'primary_list_updated': (GObject.SIGNAL_RUN_FIRST, None, (int,)),
+		'secondary_list_updated': (GObject.SIGNAL_RUN_FIRST, None, (int,)),
+		'game_moving_update': (GObject.SIGNAL_RUN_FIRST, None, (GObject.TYPE_PYOBJECT, int, int,))
+	}
 	
-	primary=[path]
-	secondary=[path]
-	'''
-	
-	
-	# Ensure value is string (for lazy saving)
-	value = str(value)
+	def __init__(self, window):
 		
-	with open(config_file, 'r+') as FILE:
-		new_contents = []
-		attribute_found = False
+		GObject.GObject.__init__(self)
 		
-		# Loop over the lines in the file to find the line with the matching attribute name
-		for line in FILE:
-			# when the line is found, replace it with the value passed in
-			if line.startswith(attribute):
-				new_contents.append(attribute + '=' + value)
-				attribute_found = True
-			# otherwise just use the existing line
+		self.window = window
+		
+		# Load settings from settings file, or use defaults if no file is present
+		# configparser handles if file doesn't exist, or if section doesn't exist
+		self.primary_path = c_liststore_primary.get('path', os.path.expanduser("~") + '/.steam/steam/SteamApps/common')
+		self.secondary_path = c_liststore_secondary.get('path', None)
+		
+		self.window_size = list(c.get('window_size', '845,612').split(','))
+		self.window_size = [int(self.window_size[0]), int(self.window_size[1])]
+		self.window_position = list(c.get('window_position', '-1,-1').split(','))
+		self.window_position = [int(self.window_position[0]), int(self.window_position[1])]
+		self.window_maximize = bool(c.get('window_maximize', False))
+		
+		# Get directory contents
+		self.primary_path_dirs = os.listdir(self.primary_path)
+		# listdir() uses the current path if the value passed to it is None
+		if self.secondary_path is None:
+			self.secondary_path_dirs = []
+		else:
+			self.secondary_path_dirs = os.listdir(self.secondary_path)
+		
+		
+		
+		
+		'''This was the previous way I was doing signals - it had the same UI blocking problem as the __gsignals__ dictionary'''
+		# Custom signals - what the view needs to know about
+		#GObject.signal_new('primary_list_updated', self.window, GObject.SIGNAL_RUN_LAST, GObject.TYPE_PYOBJECT, (GObject.TYPE_PYOBJECT,)) 
+		#GObject.signal_new('secondary_list_updated', self.window, GObject.SIGNAL_RUN_LAST, GObject.TYPE_PYOBJECT, (GObject.TYPE_PYOBJECT,)) 
+		#GObject.signal_new('game_moving_update', self.window, GObject.SIGNAL_RUN_LAST, GObject.TYPE_PYOBJECT, (GObject.TYPE_PYOBJECT, GObject.TYPE_INT, GObject.TYPE_INT)) 
+
+
+
+		
+		# Liststore values
+		# These doesn't /really/ belong here. I want to keep the liststore sort order in the settings file so it persists between sessions
+		# Putting it here keeps all the settings file stuff in one place.
+		self.liststore_primary_sort = {
+			'by' : c_liststore_primary.get('sort_by', None),
+			'type' : c_liststore_primary.get('sort_type', 'ascending')
+		}
+		self.liststore_secondary_sort = {
+			'by' : c_liststore_secondary.get('sort_by', None),
+			'type' : c_liststore_secondary.get('sort_type', 'ascending')
+		}
+		
+	
+	
+	###
+	# Accessor functions
+	###
+	
+	
+	def get_primary_path(self):
+		'''Get the primary path'''
+		return self.primary_path
+		
+	def set_primary_path(self, path):
+		'''Set the primary path and call update for primary path games list'''
+		self.primary_path = path
+		self._update_primary_path_dirs()
+		c_liststore_primary['path'] = path
+	
+	def _update_primary_path_dirs(self):
+		'''Used by set_primary_path - updates the primary path games list'''
+		if self.primary_path is None:
+			self.primary_path_dirs = []
+		else:
+			self.primary_path_dirs = os.listdir(self.primary_path)
+		self.emit('primary_list_updated', 1)
+		
+		
+	def get_secondary_path(self):
+		'''Get the secondary path'''
+		return self.secondary_path
+		
+	def set_secondary_path(self, path):
+		'''Set the secondary path and call update for secondary path games list'''
+		self.secondary_path = path
+		self._update_secondary_path_dirs()
+		c_liststore_secondary['path'] = path
+		
+	def _update_secondary_path_dirs(self):
+		'''Used by set_secondary_path - updates the secondary path games list'''	
+		if self.secondary_path is None:
+			self.secondary_path_dirs = []
+		else:
+			self.secondary_path_dirs = os.listdir(self.secondary_path)
+		self.emit('secondary_list_updated', 1)
+		
+		
+		
+	def get_primary_games(self):
+		return self._get_games('primary')
+		
+	def get_secondary_games(self):
+		return self._get_games('secondary')
+		
+	def _get_games(self, path_type):
+		'''Used by get_primary_games and get_secondary_games. 
+		Type is primary or secondary'''
+		
+		if path_type == 'primary':
+			p = self.primary_path
+			p_dirs = self.primary_path_dirs
+		elif path_type == 'secondary':
+			p = self.secondary_path
+			p_dirs = self.secondary_path_dirs
+		
+		result = []
+		for directory in p_dirs:
+			# Append: name_of_game , size_of_folder
+			if directory is None:
+				return []
 			else:
-				new_contents.append(line.rstrip())
+				result.append( [directory, _get_directory_size(os.path.join(p,directory), nice_format=True), _get_directory_size(os.path.join(p,directory))] )
 		
-		# If the attribute was not found in the file, then add it
-		if attribute_found is not True:
-			new_contents.append(attribute + '=' + value)
-		
-		FILE.seek(0)
-		FILE.write(os.linesep.join(new_contents))
-		FILE.truncate() # Discard remaining file contents (after this position)
+		return result
 
 
-def get_directory_size(path, unit='B'):
-	''' Returns the size of a directory - in bytes by default. 
+
+	# Primary sort by
+	def get_liststore_primary_sort_by(self):
+		return self.liststore_secondary_sort['by']
+	def set_liststore_primary_sort_by(self, value):
+		self.liststore_primary_sort['by'] = value
+		c_liststore_primary['sort_by'] = value
 	
-	Also supports KB
+	# Primary sort type
+	def get_liststore_primary_sort_type(self):
+		return self.liststore_secondary_sort['type']
+	def set_liststore_primary_sort_type(self, value):
+		self.liststore_primary_sort['type'] = value
+		c_liststore_primary['sort_type'] = value
+	
+	# Secondary sort by
+	def get_liststore_secondary_sort_by(self):
+		return self.liststore_secondary_sort['by']
+	def set_liststore_secondary_sort_by(self, value):
+		self.liststore_secondary_sort['by'] = value
+		c_liststore_secondary['sort_by'] = value
+	
+	# Secondary sort type	
+	def get_liststore_secondary_sort_type(self):
+		return self.liststore_secondary_sort['type']
+	def set_liststore_secondary_sort_type(self, value):
+		self.liststore_secondary_sort['type'] = value
+		c_liststore_secondary['sort_type'] = value
+	
+	
+	
+	# Window resizing / moving
+	def get_window_position(self):
+		return self.window_position
+	def set_window_position(self, x, y):
+		self.window_position = [x,y]
+		c['window_position'] = str(x) + ',' + str(y)
+		
+	def get_window_size(self):
+		return self.window_size
+	def set_window_size(self, width, height):
+		self.window_size = [width,height]
+		c['window_size'] = str(width) + ',' + str(height)
+		
+	def get_window_maximized(self):
+		return self.window_maximize
+	def set_window_maximized(self, maximize):
+		self.window_maximize = maximize
+		c['maximize'] = str(maximize)
+
+
+	def move_games_to_secondary(self, games, move_dialog):
+		'''Moves games to primary list.
+		
+		games is a list of games (the directories, not including the path)
+		move_dialog is the dialog which provides feedback to the user on progress of the move'
+		
+		move_dialog is kind of an ID to recognise which move is taking place (in case 
+		I allow multiple move dialogs in the future). Rather than passing an ID though,
+		I'm just passing the dialog object instead'''
+		print('moving games to secondary')
+		current_file_number = 1
+		total_file_number = 20
+		self.emit('game_moving_update', move_dialog, current_file_number, total_file_number)
+		
+		import time
+		time.sleep(0.5)
+		self.emit('game_moving_update', move_dialog, 5, 20)
+		time.sleep(0.5)
+		self.emit('game_moving_update', move_dialog, 10, 20)
+		time.sleep(0.5)
+		self.emit('game_moving_update', move_dialog, 15, 20)
+		
+		self.emit('game_moving_update', move_dialog, 19, 20)
+
+# If directory contents has changed, post a signal
+
+
+# Move game dir to other disk drive
+# Post a signal
+# Also post many signals showing the progress
+
+
+'''
+
+update primary list			on dir change or game move
+update secondary list		on dir change or game move
+
+
+'''
+
+
+
+def _get_directory_size(path, nice_format=False):
+	''' Returns the size of a directory in gigabytes 
 	
 	Copied from: http://stackoverflow.com/questions/1392413/calculating-a-directory-size-using-python
-	Apparently this has the same result as "du -sb"
+	Uses "du -s" as it it significantly faster than pure Python directory recursion
 	'''
+	import subprocess
+	size = int(subprocess.check_output(['du','-s', path]).split()[0].decode('utf-8'))
 	
-	total_size = 0
-	seen = set()
-
-	for dirpath, dirnames, filenames in os.walk(path):
-		for f in filenames:
-			fp = os.path.join(dirpath, f)
-
-			try:
-				stat = os.stat(fp)
-			except OSError:
-				continue
-
-			if stat.st_ino in seen:
-				continue
-
-			seen.add(stat.st_ino)
-
-			total_size += stat.st_size
+	if nice_format:
+		size = float(size) / 1024 / 1024
+		size = round(size, 1)
+		size = str(size).split('.0')[0] # Remove .0 if it ends in that
 	
-	if unit == 'KB':
-		total_size = int(total_size / 1024)
-	
-	return total_size  # default size in bytes
+	return size
 
 
-def get_file_count(path):
+def _get_file_count(path):
 	'''Returns the number of files in a directory (path)
 	
 	Counting is recursive (will count files in subdirectories) and will not count directories themselves as files.'''
 	return sum([len(files) for r, d, files in os.walk(path)])
-	
-		
-
-class Model:
-	def __init__(self):
-		self.window_coords = None
-		self.window_size = None
-		
-		self.primary_path = None
-		self.primary_path_folders = None
-		self.secondary_path = None
-		self.secondary_path_folders = None
-		
-		
-		# If config file exists, initialize values from there
-		if os.path.isfile(config_file):	
-			with open(config_file, 'r+') as FILE:
-				size_set = False
-				
-				# Get the primary and secondary paths from the settings file (if present)
-				for line in FILE:
-					
-					if line.startswith('primary'):
-						value = line[line.find('=')+1:].rstrip()
-						self.change_primary_path(value)
-						
-					elif line.startswith('secondary'):
-						value = line[line.find('=')+1:].rstrip()
-						self.change_secondary_path(value)
-							
-					elif line.startswith('window_coords'):
-						value = line[line.find('=')+1:].rstrip()
-						self.change_window_coords(ast.literal_eval(value))
-						
-					elif line.startswith('window_size'):
-						value = line[line.find('=')+1:].rstrip()
-						self.change_window_size(ast.literal_eval(value))
-
-		
-		
-		else:
-			with open(config_file, 'w') as FILE:
-				primary_path = os.path.expanduser("~") + '/.steam/steam/SteamApps/common'
-				self.change_primary_path(primary_path)
-				FILE.write('primary=' + primary_path + os.linesep)
-				FILE.write('secondary=')
-				pub.sendMessage("NO SIZE FOUND", True)	
-		
-
-	def change_primary_path(self, path):
-		if os.path.exists(path):
-			self.primary_path = path
-			self._update_list('primary')
-			_update_settings_file('primary', path)
-			pub.sendMessage("PRIMARY PATH CHANGED", 
-				{ 'path': self.primary_path,
-				  'path_folders' : self.primary_path_folders
-				})		
-			
-	def change_secondary_path(self, path):
-		if os.path.exists(path):
-			self.secondary_path = path
-			self._update_list('secondary')
-			_update_settings_file('secondary', path)
-			pub.sendMessage("SECONDARY PATH CHANGED", 
-				{ 'path': self.secondary_path,
-				  'path_folders' : self.secondary_path_folders
-				})
 
 
-	def change_window_size(self, size):
-		self.window_size = size
-		_update_settings_file('window_size', size)
-		pub.sendMessage("WINDOW SIZE CHANGED", self.window_size)
-
-	def change_window_coords(self, coords):
-		self.window_coords = coords
-		_update_settings_file('window_coords', coords)
-		pub.sendMessage("WINDOW COORDS CHANGED", self.window_coords)
-	
-	def move_games_to_secondary(self, game_names):
-		'''Moves a folder to the secondary storage'''
-		self._move_games_common(game_names, 'secondary')
-	
-	def move_games_to_primary(self, game_names):
-		'''Moves a folder to the primary storage'''
-		self._move_games_common(game_names, 'primary')
 
 
-		
-	def _move_games_common(self, game_names, listtype):	
-		if listtype == 'secondary':
-			message_type = 'SECONDARY'
-			# If moving games to secondary, broadcast that files are being moved _from_ primary (used to show the progress dialog)
-			pub.sendMessage("MOVING GAMES", { 
-				'initial_path' : self.primary_path,
-				'final_path' : self.secondary_path,
-				'game_names' : game_names})
-		elif listtype == 'primary':
-			message_type = 'PRIMARY'
-			# If moving games to primary, broadcast that files are being moved _from_ secondary (used to show the progress dialog)
-			pub.sendMessage("MOVING GAMES", { 
-				'initial_path' : self.secondary_path,
-				'final_path' : self.primary_path,
-				'game_names' : game_names})
-		
-		
-		# Move games
-		for game in game_names:
-			p = self.primary_path + os.sep + game
-			s = self.secondary_path + os.sep + game
-			
-			if listtype == 'secondary':
-				# Move game folder to secondary
-				shutil.move(p,s) # Includes "FILE MOVED" broadcast
-				# Create symlink back to primary folder
-				os.symlink(s,p)
-				
-			elif listtype == 'primary':
-				# Remove symlink on primary
-				os.remove(p)
-				# Move game folder back to primary
-				shutil.move(s,p) # Includes "FILE MOVED" broadcast
-			
-		
-		self._update_list('primary')
-		self._update_list('secondary')
-		
-		pub.sendMessage("GAMES MOVED TO " + message_type, 
-			{ 'primary_path_folders' : self.primary_path_folders,
-			  'secondary_path_folders' : self.secondary_path_folders,
-			})
-	
-	def _update_list(self, listtype):
-		if listtype == 'primary':
-			self.primary_path_folders = os.listdir(self.primary_path)
-			path = self.primary_path
-			folders = self.primary_path_folders
-		elif listtype == 'secondary':
-			self.secondary_path_folders = os.listdir(self.secondary_path)
-			path = self.secondary_path
-			folders = self.secondary_path_folders
-			
-		for folder in folders[:]:
-			if os.path.islink(path + os.sep + folder):
-				folders.remove(folder)
+
+
+
+

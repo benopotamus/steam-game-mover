@@ -1,128 +1,161 @@
 #!/usr/bin/env python
+from gi.repository import Gtk
+import Model, Dialog_move
 
-'''Allows easy moving (with symlinking) of folders to and from the SteamApps folder.
+class Handler:
+	def on_window_delete_event(self, *args):
+		Model.save_application_state()
+		Gtk.main_quit(*args)
+		
+	
+	def on_window_configure_event(self, window, event):
+		'''Get data to rememeber window position and size between sessions
+		
+		This could have been done on quit but the plan was to save this data to file as it changed. 
+		For the moment I have opted to save on quit instead as resizing and moving generate many events for the duration of those actions.
+		The downside is if the program crashes the settings will be lost - not a big deal for a program like this one.
+		'''
+		model.set_window_position(event.x, event.y)
+		model.set_window_size(event.width, event.height)
+		model.set_window_maximized(window.is_maximized())
+		
 
-Intended for users with an SSD that cannot hold all their Steam games. Allows them to easily move games not currently being played to a slower drive easily. And then move them back at a later date. The symlinking means the games can still be played regardless of which drive they are on.
+	def on_button_move_to_secondary_clicked(self, button):
+		(liststore_data, pathlist) = treeview_primary_selection.get_selected_rows()
+		
+		games_list = []
+		for path in pathlist:
+			tree_iter = liststore_data.get_iter(path)
+			value = liststore_data.get_value(tree_iter,0)
+			games_list.append(value)
+		
+		if len(games_list) > 0:
+			# Display dialog
+			dialog = Dialog_move.Dialog(window)
+			# Tell model to move games
+			model.move_games_to_secondary(games_list, dialog)
+		
+		
+		
+		#if treeiter != None:
+		#	print( "You selected", data[treeiter][0])
+			
+		#model.move_games_to_secondary()
+		#window.emit('primary_list_updated', 'test string')
+		
+		
+		#response = dialog.run()
+		#dialog.run()
+
+		'''if response == Gtk.ResponseType.OK:
+			print("The OK button was clicked")
+		elif response == Gtk.ResponseType.CANCEL:
+			print("The Cancel button was clicked")'''
+
+		#dialog.destroy()
+		
+		
+
+	def on_button_move_to_primary_clicked(self, button):
+		print("on_button_move_to_primary_clicked")
+
+	def on_filechooserbutton_primary_selection_changed(self, button):
+		model.set_primary_path(button.get_filename())
+		
+	def on_filechooserbutton_secondary_selection_changed(self, button):
+		model.set_secondary_path(button.get_filename())
+		
+	def on_button_cancel_move_clicked(self, button):
+		pass
+	
+	def on_dialog_move_delete_event(self, dialog, event):
+		dialog.hide()
+
+
+# Custom handlers for signals emitted by model
+# `window` is a parameter only because all signals are defined on it
+def primary_list_updated(window, msg):
+	liststore_primary.clear()
+	for row in model.get_primary_games():
+		liststore_primary.append(row)
+
+def secondary_list_updated(window, msg):
+	liststore_secondary.clear()
+	for row in model.get_secondary_games():
+		liststore_secondary.append(row)
+
+def game_moving_update(window, dialog, current_file_number, total_file_number):
+	'''Updates the view (move dialog box) "X of Y" numbers and progress bar'''
+	print('runnning game_moving_update')
+	dialog.update(current_file_number, total_file_number)
 
 
 
-	 This program is free software: you can redistribute it and/or modify
-	 it under the terms of the GNU General Public License as published by
-	 the Free Software Foundation, either version 3 of the License, or
-	 (at your option) any later version.
 
-	 This program is distributed in the hope that it will be useful,
-	 but WITHOUT ANY WARRANTY; without even the implied warranty of
-	 MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-	 GNU General Public License for more details.
+# Builder loads widgets from glade file
+# .get_object() is used to get a reference to the widget
+builder = Gtk.Builder()
+builder.add_from_file("main.glade")
+builder.connect_signals(Handler())
 
-	 You should have received a copy of the GNU General Public License
-	 along with this program.  If not, see <http://www.gnu.org/licenses/>.
-	 
-'''
+builder.get_object('treemodelsort_primary').set_sort_column_id(0, Gtk.SortType.ASCENDING)
+builder.get_object('treemodelsort_secondary').set_sort_column_id(0, Gtk.SortType.ASCENDING)
 
-import os, wx
-import layout, Model
-from wx.lib.pubsub import Publisher as pub
-	
+liststore_primary = builder.get_object('liststore_primary')
+liststore_secondary = builder.get_object('liststore_secondary')
+
+treeview_primary = builder.get_object('treeview_primary')
+treeview_secondary = builder.get_object('treeview_secondary')
+
+treeview_primary_selection = treeview_primary.get_selection()
+treeview_secondary_selection = treeview_secondary.get_selection()
+
+window = builder.get_object("window")
+model = Model.Model(window)
 
 
-class Frame(layout.MainFrame):
-	'''Used wxFormBuilder to create the UI so create an instance of that and overwrite necessary methods and attributes)'''
+# Bind callbacks (defined above) for model signals
+model.connect('primary_list_updated', primary_list_updated)
+model.connect('secondary_list_updated', secondary_list_updated)
+
+model.connect('game_moving_update', game_moving_update)
+
+
+
+### 
+# Populate View with initial data
+###
+
+### Window parameters
+
+# Window size
+s = model.get_window_size()
+window.resize(s[0], s[1])
+
+# Window position
+s = model.get_window_position()
+# If the settings file did not exist at startup, the model position is -1,-1
+if s[0] == -1:
+	window.set_position(Gtk.WindowPosition.CENTER)
+else:
+	window.move(s[0], s[1])
 	
-	def __init__(self, parent):
-		super( Frame, self ).__init__(parent)
-		
-		#### The following binds/subscribes controller functions to model broadcasts ####
-		# These will all just take the broadcast and update the view/widgets from layout.py
-		pub.subscribe(self.primary_path_changed, "PRIMARY PATH CHANGED")
-		pub.subscribe(self.secondary_path_changed, "SECONDARY PATH CHANGED")
-		pub.subscribe(self.games_move_to_secondary, "GAMES MOVED TO SECONDARY")
-		pub.subscribe(self.games_move_to_primary, "GAMES MOVED TO PRIMARY")
-		pub.subscribe(self.display_move_dialog, "MOVING GAMES")
-		pub.subscribe(self.window_size_changed, "WINDOW SIZE CHANGED")
-		pub.subscribe(self.window_coords_changed, "WINDOW COORDS CHANGED")
-		pub.subscribe(self.use_default_window_size, "NO SIZE FOUND")
-		
-		# Model is created after subscriptions because it broadcasts on instantiation (when it gets settings from config file)
-		self.model = Model.Model()
-		
+# Window maximisation
+if model.get_window_maximized():
+	window.maximize()
+
+# File chooser buttons - simulates the "selection-changed" action and signal
+filechooserbutton_primary = builder.get_object("filechooserbutton_primary")
+filechooserbutton_secondary = builder.get_object("filechooserbutton_secondary")
+
+if filechooserbutton_primary.set_current_folder(model.get_primary_path()): # This line simulates the UI action
+	# set_current_folder returns true if successful, emit the appropriate signal
+	filechooserbutton_primary.emit('selection-changed') # This line simulates the signal emiting
 	
-	#### The following 'on' methods are bound to the widgets in layout.py	####
-	
-	def on_games_move( self, event ):
-		if event.GetEventObject().GetName() == 'move_to_secondary_button':
-			games = self.left_listbox.GetSelectionsStrings()
-			self.model.move_games_to_secondary(games)
-		elif event.GetEventObject().GetName() == 'move_to_primary_button':
-			games = self.right_listbox.GetSelectionsStrings()
-			self.model.move_games_to_primary(games)
-		event.Skip()
-	
-	def on_change_primary_dir_choice(self, event):
-		# In this case we include a "New directory" button. 
-		dlg = wx.DirDialog(self, "Choose a directory:", style=wx.DD_DEFAULT_STYLE)
-		if dlg.ShowModal() == wx.ID_OK:
-			self.model.change_primary_path(dlg.GetPath())
-		# Only destroy a dialog after we're done with it
-		dlg.Destroy()
-		
-	def on_change_secondary_dir_choice(self, event):
-		# In this case we include a "New directory" button. 
-		dlg = wx.DirDialog(self, "Choose a directory:", style=wx.DD_DEFAULT_STYLE)
-		if dlg.ShowModal() == wx.ID_OK:
-			self.model.change_secondary_path(dlg.GetPath())
-		# Only destroy a dialog after we're done with it
-		dlg.Destroy()
-	
-	def on_frame_close( self, event ):
-		''' Save window position and size on close'''
-		self.model.change_window_size(self.GetSize())
-		self.model.change_window_coords(self.GetPosition())
-		event.Skip()
-		
-		
-		
-	
-	#### Broadcast response methods ####
-	
-	def primary_path_changed(self,message):
-		self.primary_dir_choice_button.SetLabel(message.data['path'])
-		self.left_listbox.SetItems(message.data['path_folders'])
-		
-	def secondary_path_changed(self,message):
-		self.secondary_dir_choice_button.SetLabel(message.data['path'])
-		self.right_listbox.SetItems(message.data['path_folders'])
-		
-	def games_move_to_secondary(self,message):
-		self.left_listbox.SetItems(message.data['primary_path_folders'])
-		self.right_listbox.SetItems(message.data['secondary_path_folders'])
-	# Same method for games_move_to_primary
-	games_move_to_primary = games_move_to_secondary
-		
-	def window_size_changed(self,message):
-		self.SetSize(message.data)
-		
-	def window_coords_changed(self,message):
-		self.SetPosition(message.data)
-	
-	def use_default_window_size(self,message):
-		self.Fit()
-		
-	def display_move_dialog(self, message):
-		'''When model broadcasts games are being moved, creates a file moving (progress) dialog'''
-		self.progress_dialog = layout.Moving_progress_dialog(self, message.data['initial_path'], message.data['final_path'], message.data['game_names'])
-	
-	
-	
-class App(wx.App):
-	
-	def OnInit(self):
-		self.frame = Frame(parent=None)
-		self.frame.Show()
-		self.SetTopWindow(self.frame)		
-		return True
-		
-if __name__ == '__main__':
-	app = App()
-	app.MainLoop()
+if model.get_secondary_path() is not None and filechooserbutton_secondary.set_current_folder(model.get_secondary_path()):
+	# set_current_folder returns true if successful, emit the appropriate signal
+	filechooserbutton_secondary.emit('selection-changed')
+
+
+window.show_all()
+Gtk.main()
